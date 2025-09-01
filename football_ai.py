@@ -1,80 +1,86 @@
 import streamlit as st
 import requests
-from datetime import datetime, timedelta
+import datetime
 
-# ============================
+# ===============================
 # CONFIG
-# ============================
-SOFA = "https://api.sofascore.com/api/v1"
-DAYS_AHEAD = 2
+# ===============================
+BASE_URL = "https://api.sofascore.com/api/v1"
 
-st.set_page_config(page_title="Football Betting AI", layout="wide")
-st.title("⚽ Football Betting AI — Upcoming Matches")
-st.caption("Form + travel + referee tendencies. For analysis only — not financial advice.")
-
-# ============================
-# HELPERS
-# ============================
+# ===============================
+# HELPER FUNCTIONS
+# ===============================
 @st.cache_data
 def fetch_json(url):
-    r = requests.get(url, timeout=15)
+    r = requests.get(url, headers={"User-Agent": "Mozilla/5.0"})
     r.raise_for_status()
     return r.json()
 
-def get_upcoming_matches(days_ahead=DAYS_AHEAD):
-    """Fetch fixtures today + tomorrow."""
-    events = []
-    today = datetime.utcnow().date()
+def get_upcoming_matches(days_ahead=2):
+    """Fetch only upcoming football matches for today/tomorrow."""
+    matches = []
+    now = datetime.datetime.utcnow()
     for i in range(days_ahead):
-        d = today + timedelta(days=i)
-        url = f"{SOFA}/sport/football/scheduled-events/{d}"
-        try:
-            data = fetch_json(url)
-            events.extend(data.get("events", []))
-        except Exception as e:
-            st.warning(f"⚠️ Could not fetch {d}: {e}")
-    return events
+        date = (now + datetime.timedelta(days=i)).strftime("%Y-%m-%d")
+        url = f"{BASE_URL}/sport/football/scheduled-events/{date}"
+        data = fetch_json(url)
+        for ev in data.get("events", []):
+            start_time = datetime.datetime.utcfromtimestamp(ev["startTimestamp"])
+            if start_time > now:  # ✅ only future matches
+                matches.append(ev)
+    return matches
 
-def normalize_tournament(ev):
+def get_match_stats(event_id):
+    """Fetch match statistics if available."""
+    url = f"{BASE_URL}/event/{event_id}/statistics"
     try:
-        return ev["tournament"]["name"]
+        return fetch_json(url)
     except:
-        return "Unknown"
+        return {}
 
-def display_match(ev):
-    h = ev["homeTeam"]["name"]
-    a = ev["awayTeam"]["name"]
-    t = datetime.utcfromtimestamp(ev["startTimestamp"]).strftime("%Y-%m-%d %H:%M UTC")
-    return f"{h} vs {a} ({t})"
+# ===============================
+# STREAMLIT APP
+# ===============================
+st.title("⚽ Football Betting AI — Upcoming Matches")
+st.caption("Form + travel + referee tendencies (experimental). Not financial advice.")
 
-# ============================
-# MAIN
-# ============================
-matches = get_upcoming_matches()
+# Pick view
+view = st.selectbox("📅 Pick a view", ["All Matches Today/Tomorrow 🌍"])
 
-if not matches:
-    st.error("No matches found from SofaScore. Try again later.")
-    st.stop()
-
-# Tournament filter
-tournaments = sorted(set(normalize_tournament(ev) for ev in matches))
-choice = st.selectbox("Filter by tournament", ["All Matches"] + tournaments)
-
-if choice != "All Matches":
-    matches = [m for m in matches if normalize_tournament(m) == choice]
+# Fetch matches
+matches = get_upcoming_matches(days_ahead=2)
 
 if not matches:
-    st.warning("No upcoming matches found for the selected filter.")
-    st.stop()
+    st.warning("⚠️ No upcoming matches found for today/tomorrow. Try again later.")
+else:
+    # Dropdown to choose match
+    match_options = [
+        f"{m['homeTeam']['name']} vs {m['awayTeam']['name']} "
+        f"({datetime.datetime.utcfromtimestamp(m['startTimestamp']).strftime('%Y-%m-%d %H:%M UTC')})"
+        for m in matches
+    ]
+    selected = st.selectbox("🎯 Choose an upcoming match", match_options)
 
-# Pick a match
-match = st.selectbox("Choose an upcoming match", matches, format_func=display_match)
+    if selected:
+        idx = match_options.index(selected)
+        match = matches[idx]
+        event_id = match["id"]
 
-st.success(f"Selected: {display_match(match)} • {normalize_tournament(match)}")
+        st.success(
+            f"Selected: {match['homeTeam']['name']} vs {match['awayTeam']['name']} • {match['tournament']['name']}"
+        )
 
-# ============================
-# Example prediction placeholder
-# ============================
-st.subheader("🔮 AI Prediction (demo)")
-st.write("This section will calculate win %, corners, fouls, etc. using past data + travel evaluation.")
-st.info("Coming next: integrate historical stats + betting evaluation engine.")
+        # Fetch team stats
+        st.write("📊 Fetching team form & statistics...")
+        stats = get_match_stats(event_id)
+
+        if not stats:
+            st.warning("No statistics available yet for this match.")
+        else:
+            st.json(stats)
+
+        # Dummy prediction logic (placeholder until ML model is added)
+        st.subheader("🔮 AI Prediction (Demo)")
+        st.write("Home win chance: 45%")
+        st.write("Draw chance: 25%")
+        st.write("Away win chance: 30%")
