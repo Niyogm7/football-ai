@@ -65,13 +65,15 @@ def to_float(x, default=0.0):
 # DATA SOURCING (safe)
 # ==============================
 def get_upcoming_matches(days_ahead=DAYS_AHEAD):
-    """Public endpoint: scheduled-events over a date range."""
+    """Fetch fixtures day by day (today + days_ahead-1)."""
+    events = []
     today = datetime.utcnow().date()
-    end = today + timedelta(days=days_ahead-1)
-    url = f"{SOFA}/sport/football/scheduled-events/{today}/{end}"
-    data = fetch_json(url)
-    return data.get("events", [])
-
+    for i in range(days_ahead):
+        d = today + timedelta(days=i)
+        url = f"{SOFA}/sport/football/scheduled-events/{d}"
+        data = fetch_json(url)
+        events.extend(data.get("events", []))
+    return events
 def team_last_events(team_id: int, n=N_FORM_MATCHES):
     """Finished matches only (SofaScore provides these reliably)."""
     url = f"{SOFA}/team/{team_id}/events/last/{n}"
